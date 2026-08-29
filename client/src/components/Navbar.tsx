@@ -1,5 +1,5 @@
 import { useState, useEffect, memo } from 'react';
-import { Menu, X, ArrowRight, Flame, Image as ImageIcon, History } from 'lucide-react';
+import { Menu, X, ArrowRight, Flame } from 'lucide-react';
 import { useSectionObserver } from '../hooks/useIntersectionObserver';
 
 interface NavbarProps {
@@ -112,27 +112,25 @@ export const Navbar = memo(function Navbar({ onJoinClick, currentView, onNavigat
             {/* In-Page View: Past Events */}
             <button
               onClick={() => { onNavigate('past-events'); setMobileOpen(false); }}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 currentView === 'past-events'
-                  ? 'text-amber-400 bg-amber-500/15 border border-amber-500/30'
+                  ? 'text-amber-400 bg-amber-500/15'
                   : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
-              <History className="w-3.5 h-3.5" />
-              <span>Past Events</span>
+              Past Events
             </button>
 
             {/* In-Page View: Gallery */}
             <button
               onClick={() => { onNavigate('gallery'); setMobileOpen(false); }}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
                 currentView === 'gallery'
-                  ? 'text-blue-400 bg-blue-500/15 border border-blue-500/30'
+                  ? 'text-blue-400 bg-blue-500/15'
                   : 'text-slate-300 hover:text-white hover:bg-white/5'
               }`}
             >
-              <ImageIcon className="w-3.5 h-3.5" />
-              <span>Gallery</span>
+              Gallery
             </button>
 
             <button
