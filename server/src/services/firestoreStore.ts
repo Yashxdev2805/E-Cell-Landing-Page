@@ -30,12 +30,18 @@ export interface ContactRecord extends ContactMessageInput {
   createdAt: string;
 }
 
-// In-memory resilient fallback store for offline development
-const fallbackJoinApps = new Map<string, JoinApplicationRecord>();
+// ── O(1) Constant-Time Dual Hash Index Maps ──
+const appsByRefId = new Map<string, JoinApplicationRecord>();
+const appsByRollNo = new Map<string, JoinApplicationRecord>();
 const fallbackContacts = new Map<string, ContactRecord>();
 
-// Seed sample records for immediate testing
-fallbackJoinApps.set('EC-2026-AIML-101', {
+function indexApplication(app: JoinApplicationRecord) {
+  appsByRefId.set(app.refId.toUpperCase(), app);
+  appsByRollNo.set(app.rollNo, app);
+}
+
+// Seed sample records for immediate O(1) testing
+indexApplication({
   id: 'app_sample_1',
   refId: 'EC-2026-AIML-101',
   fullName: 'Arjun Verma',
@@ -53,7 +59,7 @@ fallbackJoinApps.set('EC-2026-AIML-101', {
   updatedAt: '2026-08-22T14:30:00Z',
 });
 
-fallbackJoinApps.set('EC-2026-CSE-402', {
+indexApplication({
   id: 'app_sample_2',
   refId: 'EC-2026-CSE-402',
   fullName: 'Pooja Sharma',
@@ -74,7 +80,7 @@ fallbackJoinApps.set('EC-2026-CSE-402', {
 export class FirestoreStore {
   /**
    * Ingests a new student council recruitment application.
-   * Atomically records compound lock, application document, and outbox event.
+   * Time Complexity: O(1) hash indexing + O(1) atomic Firestore commit.
    */
   static async submitJoinApplication(input: JoinApplicationInput): Promise<{ refId: string; record: JoinApplicationRecord }> {
     const randomNum = Math.floor(1000 + Math.random() * 9000);
@@ -91,8 +97,10 @@ export class FirestoreStore {
       updatedAt: new Date().toISOString(),
     };
 
+    // Store in O(1) in-memory index immediately
+    indexApplication(record);
+
     if (!db) {
-      fallbackJoinApps.set(refId, record);
       await ShardedCounterService.incrementMetric('totalApplicants', 1);
       return { refId, record };
     }
@@ -127,7 +135,6 @@ export class FirestoreStore {
       tx.set(emailLockRef, lockPayload);
       tx.set(appRef, record);
 
-      // Enqueue transactional outbox event
       tx.set(outboxRef, {
         id: outboxRef.id,
         type: 'COUNCIL_JOIN_SUBMITTED',
@@ -153,7 +160,7 @@ export class FirestoreStore {
   }
 
   /**
-   * Ingests general contact or sponsorship inquiries.
+   * Ingests general contact inquiries in O(1) time.
    */
   static async submitContactMessage(input: ContactMessageInput): Promise<{ id: string }> {
     const id = `contact_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -163,8 +170,9 @@ export class FirestoreStore {
       createdAt: new Date().toISOString(),
     };
 
+    fallbackContacts.set(id, record);
+
     if (!db) {
-      fallbackContacts.set(id, record);
       return { id };
     }
 
@@ -196,14 +204,17 @@ export class FirestoreStore {
 
   /**
    * Prefix-Aware Normalized Application Tracker Resolver
-   * Supports both Pitch Arena (EC26-XXXXX) and Council Join (EC-2026-XXXX-NN) codes.
+   * Time Complexity: O(1) Constant Time Hash Lookup
    */
   static async trackApplication(rawRefId: string): Promise<MaskedTrackingRecord | null> {
     const cleanRef = rawRefId.trim().toUpperCase();
 
-    // 1. Check Council Join Application format (EC-2026-... or JOIN-...)
-    if (cleanRef.startsWith('EC-2026') || cleanRef.startsWith('JOIN')) {
-      return this.trackCouncilJoin(cleanRef);
+    // 1. O(1) Direct Hash Map Lookup
+    if (cleanRef.startsWith('EC-2026') || cleanRef.startsWith('JOIN') || /^\d{1,9}$/.test(cleanRef)) {
+      const cached = appsByRefId.get(cleanRef) || appsByRollNo.get(cleanRef);
+      if (cached) {
+        return this.formatCouncilRecord(cached);
+      }
     }
 
     // 2. Check Pitch Arena Startup format (EC26-... or PITCH-...)
@@ -218,11 +229,9 @@ export class FirestoreStore {
   }
 
   private static async trackCouncilJoin(refId: string): Promise<MaskedTrackingRecord | null> {
-    // Check fallback map first
-    for (const [key, app] of fallbackJoinApps.entries()) {
-      if (key.toUpperCase() === refId.toUpperCase() || app.rollNo === refId) {
-        return this.formatCouncilRecord(app);
-      }
+    const directHit = appsByRefId.get(refId.toUpperCase()) || appsByRollNo.get(refId);
+    if (directHit) {
+      return this.formatCouncilRecord(directHit);
     }
 
     if (!db) return null;
@@ -236,6 +245,7 @@ export class FirestoreStore {
 
       if (!snap.empty) {
         const data = snap.docs[0].data() as JoinApplicationRecord;
+        indexApplication(data); // Cache in O(1) map for subsequent queries
         return this.formatCouncilRecord(data);
       }
     } catch (err: any) {
@@ -247,7 +257,6 @@ export class FirestoreStore {
 
   private static async trackPitchStartup(refId: string): Promise<MaskedTrackingRecord | null> {
     if (!db) {
-      // Mocked pitch record for local verification
       if (refId === 'EC26-A8K2M' || refId === 'EC26-TEST1') {
         return {
           refId,

@@ -13,18 +13,34 @@ export interface TelemetryStats {
   lastUpdated: string;
 }
 
-// In-memory SWR cache for sub-millisecond fast edge reads
-let cachedStats: TelemetryStats | null = null;
-let cacheExpiresAt = 0;
-const SWR_TTL_MS = 60_000; // 60 seconds SWR window
+// ── O(1) Sub-Microsecond High-Performance Accumulator ──
+const baselineStats: TelemetryStats = {
+  startupsRegistered: 150,
+  totalApplicants: 540,
+  workshopsHosted: 28,
+  activeCommunity: 1200,
+  lastUpdated: new Date().toISOString(),
+};
+
+let cachedStats: TelemetryStats = { ...baselineStats };
+let isReconciling = false;
 
 export class ShardedCounterService {
   /**
-   * Randomly increments one of the 10 shards to prevent write hotspotting (OCC thrashing).
+   * Randomly increments one of the 10 shards in O(1) time.
+   * Updates in-memory accumulator in O(1) sub-microsecond time.
    */
   static async incrementMetric(metric: 'startupsRegistered' | 'totalApplicants' | 'workshopsHosted', count = 1): Promise<void> {
+    // 1. O(1) Write-Through Memory Update
+    cachedStats[metric] += count;
+    if (metric === 'totalApplicants') {
+      cachedStats.activeCommunity += Math.floor(count * 1.5);
+    }
+    cachedStats.lastUpdated = new Date().toISOString();
+
     if (!db) return;
 
+    // 2. Asynchronous Shard Dispersion
     const shardId = Math.floor(Math.random() * NUM_SHARDS).toString();
     const shardRef = db
       .collection(SHARDS_COLLECTION)
@@ -32,43 +48,33 @@ export class ShardedCounterService {
       .collection('shards')
       .doc(shardId);
 
-    try {
-      await shardRef.set(
+    shardRef
+      .set(
         {
           [metric]: FieldValue.increment(count),
           lastIncrementAt: new Date().toISOString(),
         },
         { merge: true }
-      );
-      // Invalidate read cache
-      cacheExpiresAt = 0;
-    } catch (err: any) {
-      console.warn(`⚠️ [ShardedCounter] Failed to increment shard ${shardId}:`, err?.message || err);
-    }
+      )
+      .catch((err) => {
+        console.warn(`⚠️ [ShardedCounter] Async shard ${shardId} update warning:`, err?.message || err);
+      });
   }
 
   /**
-   * Aggregates all 10 shards with SWR caching.
+   * Returns aggregated telemetry metrics in O(1) sub-millisecond memory speed.
    */
   static async getAggregatedStats(): Promise<TelemetryStats> {
-    const now = Date.now();
-    if (cachedStats && now < cacheExpiresAt) {
-      return cachedStats;
+    // Triggers async non-blocking background reconciliation if db is active
+    if (db && !isReconciling) {
+      this.reconcileAsync();
     }
+    return cachedStats;
+  }
 
-    const baselineStats: TelemetryStats = {
-      startupsRegistered: 150,
-      totalApplicants: 540,
-      workshopsHosted: 28,
-      activeCommunity: 1200,
-      lastUpdated: new Date().toISOString(),
-    };
-
-    if (!db) {
-      cachedStats = baselineStats;
-      cacheExpiresAt = now + SWR_TTL_MS;
-      return cachedStats;
-    }
+  private static async reconcileAsync(): Promise<void> {
+    if (!db || isReconciling) return;
+    isReconciling = true;
 
     try {
       const shardsSnapshot = await db
@@ -95,13 +101,12 @@ export class ShardedCounterService {
         activeCommunity: baselineStats.activeCommunity + Math.floor(dynamicApplicants * 1.5),
         lastUpdated: new Date().toISOString(),
       };
-      cacheExpiresAt = now + SWR_TTL_MS;
-      return cachedStats;
-    } catch (err: any) {
-      console.warn('⚠️ [ShardedCounter] Read aggregation failed, serving baseline:', err?.message || err);
-      cachedStats = baselineStats;
-      cacheExpiresAt = now + 15_000;
-      return cachedStats;
+    } catch {
+      // Retain in-memory accumulator on network glitches
+    } finally {
+      setTimeout(() => {
+        isReconciling = false;
+      }, 60000); // Reconcile at most once per minute in background
     }
   }
 }
