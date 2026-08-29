@@ -1,114 +1,76 @@
-import { useState, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import { Navbar } from './components/Navbar';
 import { HeroSection } from './components/HeroSection';
 import { AboutSection } from './components/AboutSection';
 import { EventsSection } from './components/EventsSection';
-import { ApplicationTracker } from './components/ApplicationTracker';
 import { TeamSection } from './components/TeamSection';
+import { ApplicationTracker } from './components/ApplicationTracker';
 import { PastEventsView } from './components/PastEventsView';
 import { GalleryView } from './components/GalleryView';
 import { JoinModal } from './components/JoinModal';
 import { ContactModal } from './components/ContactModal';
+import { AdminOpsDrawer } from './components/AdminOpsDrawer';
 import { Footer } from './components/Footer';
 
-export type AppView = 'home' | 'past-events' | 'gallery';
+export type PageView = 'home' | 'past-events' | 'gallery';
 
-export default function App() {
-  const [currentView, setCurrentView] = useState<AppView>('home');
-  const [joinOpen, setJoinOpen] = useState(false);
-  const [contactOpen, setContactOpen] = useState(false);
+export function App() {
+  const [currentView, setCurrentView] = useState<PageView>('home');
+  const [joinModalOpen, setJoinModalOpen] = useState(false);
+  const [contactModalOpen, setContactModalOpen] = useState(false);
+  const [adminDrawerOpen, setAdminDrawerOpen] = useState(false);
 
-  const openJoin = useCallback(() => setJoinOpen(true), []);
-  const closeJoin = useCallback(() => setJoinOpen(false), []);
-  const openContact = useCallback(() => setContactOpen(true), []);
-  const closeContact = useCallback(() => setContactOpen(false), []);
-
-  const handleNavigate = useCallback((view: AppView) => {
-    setCurrentView(view);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+  useEffect(() => {
+    const handleToggleAdmin = () => setAdminDrawerOpen((prev) => !prev);
+    window.addEventListener('toggle-admin-drawer', handleToggleAdmin);
+    return () => window.removeEventListener('toggle-admin-drawer', handleToggleAdmin);
   }, []);
 
-  return (
-    <div className="min-h-screen bg-[var(--bg-main)] text-slate-100 relative selection:bg-blue-600 selection:text-white">
-      {/* ── Fixed Page-Wide Ambient Radiant Background Mesh & Dot Grid (Seamless across all views) ── */}
-      <div className="fixed inset-0 portal-bg-mesh pointer-events-none opacity-90 z-0" />
+  const handleNavigate = (view: PageView) => {
+    setCurrentView(view);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
-      {/* Navigation */}
+  return (
+    <div className="min-h-screen bg-[#07080a] text-slate-100 flex flex-col font-sans relative overflow-x-hidden portal-bg-mesh">
       <Navbar
-        onJoinClick={openJoin}
+        onJoinClick={() => setJoinModalOpen(true)}
         currentView={currentView}
         onNavigate={handleNavigate}
       />
 
-      <main className="relative z-10">
-        {/* VIEW 1: HOME MAIN PORTAL */}
+      <main className="flex-grow">
         {currentView === 'home' && (
           <>
-            {/* Hero */}
-            <HeroSection onJoinClick={openJoin} />
-
-            <div className="section-divider" />
-
-            {/* About & KPI Counters */}
+            <HeroSection onJoinClick={() => setJoinModalOpen(true)} />
             <AboutSection />
-
-            <div className="section-divider" />
-
-            {/* Events Showcase */}
             <EventsSection />
-
-            <div className="section-divider" />
-
-            {/* Application Tracker */}
-            <ApplicationTracker />
-
-            <div className="section-divider" />
-
-            {/* Executive Board */}
             <TeamSection />
-
-            <div className="section-divider" />
-
-            {/* Contact Section CTA */}
-            <section id="contact" className="section-container">
-              <div className="ecell-card p-8 sm:p-12 text-center bg-gradient-to-br from-[#0d111a] via-[#0f1520] to-[#0d111a]">
-                <h2 className="text-2xl sm:text-3xl font-extrabold text-white font-heading mb-4">
-                  Have Questions or Want to Sponsor?
-                </h2>
-                <p className="text-slate-400 max-w-xl mx-auto mb-8">
-                  Whether you're a student looking to get involved, a startup seeking mentorship,
-                  or an organization interested in sponsoring our events — we'd love to hear from you.
-                </p>
-                <div className="flex flex-wrap items-center justify-center gap-4">
-                  <button onClick={openJoin} className="btn-primary text-sm py-3 px-6">
-                    Join E-Cell
-                  </button>
-                  <button onClick={openContact} className="btn-secondary text-sm py-3 px-6">
-                    Contact Us
-                  </button>
-                </div>
-              </div>
-            </section>
+            <ApplicationTracker />
           </>
         )}
 
-        {/* VIEW 2: PAST EVENTS ARCHIVE (In-Page View) */}
         {currentView === 'past-events' && (
           <PastEventsView onBack={() => handleNavigate('home')} />
         )}
 
-        {/* VIEW 3: PHOTO GALLERY (In-Page View) */}
         {currentView === 'gallery' && (
           <GalleryView onBack={() => handleNavigate('home')} />
         )}
       </main>
 
-      {/* Footer */}
-      <Footer onNavigate={handleNavigate} />
+      <Footer
+        onContactClick={() => setContactModalOpen(true)}
+        onNavigate={handleNavigate}
+        onOpenAdminOps={() => setAdminDrawerOpen(true)}
+      />
 
-      {/* Modals — focus-trapped <dialog> elements */}
-      <JoinModal isOpen={joinOpen} onClose={closeJoin} />
-      <ContactModal isOpen={contactOpen} onClose={closeContact} />
+      {/* Modals & Overlays */}
+      <JoinModal isOpen={joinModalOpen} onClose={() => setJoinModalOpen(false)} />
+      <ContactModal isOpen={contactModalOpen} onClose={() => setContactModalOpen(false)} />
+      <AdminOpsDrawer isOpen={adminDrawerOpen} onClose={() => setAdminDrawerOpen(false)} />
     </div>
   );
 }
+
+export default App;

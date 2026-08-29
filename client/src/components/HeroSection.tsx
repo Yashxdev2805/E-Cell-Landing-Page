@@ -1,10 +1,7 @@
 import { useState, useEffect, memo } from 'react';
-import {
-  Flame,
-  ArrowRight,
-  ExternalLink,
-} from 'lucide-react';
+import { Flame, ArrowRight, ExternalLink } from 'lucide-react';
 import { fetchPortalStats, type TelemetryData } from '../services/api';
+import { sseClient } from '../services/sseClient';
 import { syncBus } from '../utils/crossAppEvents';
 
 interface HeroSectionProps {
@@ -20,25 +17,31 @@ export const HeroSection = memo(function HeroSection({ onJoinClick }: HeroSectio
     lastUpdated: '',
   });
 
+  const [pulsing, setPulsing] = useState(false);
+
   useEffect(() => {
-    // 1. Initial SWR fetch
+    // 1. Initial fetch
     fetchPortalStats().then(setStats).catch(() => {});
 
-    // 2. Refresh on real-time cross-tab sync events
-    const unsubscribe = syncBus.subscribe((msg) => {
-      if (msg.type === 'PITCH_REGISTRATION_COMMITTED' || msg.type === 'JOIN_APPLICATION_COMMITTED') {
-        fetchPortalStats().then(setStats).catch(() => {});
+    // 2. Real-Time Push Stream via SSE
+    const unsubscribeSSE = sseClient.subscribe((msg) => {
+      if (msg.type === 'NEW_REGISTRATION' || msg.type === 'TELEMETRY_UPDATED') {
+        setPulsing(true);
+        fetchPortalStats().then((newStats) => {
+          setStats(newStats);
+          setTimeout(() => setPulsing(false), 2000);
+        }).catch(() => setPulsing(false));
       }
     });
 
-    // 3. Periodic SWR polling every 30 seconds
-    const interval = setInterval(() => {
+    // 3. BroadcastChannel cross-tab bridge
+    const unsubscribeSync = syncBus.subscribe(() => {
       fetchPortalStats().then(setStats).catch(() => {});
-    }, 30000);
+    });
 
     return () => {
-      unsubscribe();
-      clearInterval(interval);
+      unsubscribeSSE();
+      unsubscribeSync();
     };
   }, []);
 
@@ -49,7 +52,9 @@ export const HeroSection = memo(function HeroSection({ onJoinClick }: HeroSectio
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative z-10 text-center">
         {/* Real E-Summit 2026 Announcement Capsule */}
-        <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/10 border border-amber-500/25 text-xs font-semibold text-amber-300 mb-8 backdrop-blur-md shadow-lg">
+        <div className={`inline-flex items-center gap-2 px-4 py-2 rounded-full bg-amber-500/10 border border-amber-500/25 text-xs font-semibold text-amber-300 mb-8 backdrop-blur-md shadow-lg transition-all duration-500 ${
+          pulsing ? 'scale-105 ring-2 ring-amber-400/50 bg-amber-500/20' : ''
+        }`}>
           <span className="flex h-2 w-2 relative">
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
             <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500" />
