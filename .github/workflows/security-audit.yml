@@ -1,0 +1,25 @@
+name: Security Audit & Code Health
+
+on:
+  schedule:
+    - cron: '0 0 * * 0' # Every Sunday midnight
+  push:
+    branches: [ "main", "master" ]
+  workflow_dispatch:
+
+jobs:
+  security-scan:
+    name: Dependency Vulnerability Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run npm Audit
+        working-directory: ./client
+        run: npm audit --audit-level=moderate || true
