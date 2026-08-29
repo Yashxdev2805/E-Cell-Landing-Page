@@ -5,8 +5,15 @@ import { JoinApplicationSchema, ContactMessageSchema } from '../schemas/portalSc
 import { turnstileMiddleware } from '../middleware/turnstile.js';
 import { idempotencyMiddleware } from '../middleware/idempotency.js';
 import { trackerLimiter, submitLimiter } from '../middleware/rateLimiter.js';
+import { sseHub } from '../services/sseHub.js';
 
 export const portalRouter = Router();
+
+// ── GET /api/portal/events/stream (Server-Sent Events Real-Time Telemetry Stream) ──
+portalRouter.get('/events/stream', (req: Request, res: Response) => {
+  const unsubscribe = sseHub.registerClient(res);
+  req.on('close', unsubscribe);
+});
 
 // ── GET /api/portal/stats (Aggregated Sharded Telemetry) ──
 portalRouter.get('/stats', async (_req: Request, res: Response) => {
@@ -43,7 +50,7 @@ portalRouter.get('/track/:refId', trackerLimiter, async (req: Request, res: Resp
   });
 });
 
-// ── POST /api/portal/join (Recruitment Application Ingest) ──
+// ── POST /api/portal/join (Recruitment Application Ingest with Real-Time Push) ──
 portalRouter.post(
   '/join',
   submitLimiter,
@@ -63,6 +70,15 @@ portalRouter.post(
 
     try {
       const { refId, record } = await FirestoreStore.submitJoinApplication(parseResult.data);
+
+      // Real-Time SSE Push Event to all connected clients
+      sseHub.emitEvent('NEW_REGISTRATION', {
+        refId,
+        domain: record.domain,
+        branch: record.branch,
+        timestamp: record.createdAt,
+      });
+
       res.status(201).json({
         success: true,
         message: 'Your council recruitment application has been submitted successfully!',

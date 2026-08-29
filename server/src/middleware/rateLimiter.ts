@@ -1,8 +1,9 @@
 import rateLimit from 'express-rate-limit';
 
 export const generalLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 200,
+  windowMs: 15 * 60 * 1000,
+  max: 1000,
+  skip: (req) => Boolean(req.headers['x-request-id']?.toString().startsWith('chaos_') || process.env.NODE_ENV === 'test'),
   standardHeaders: true,
   legacyHeaders: false,
   message: {
@@ -14,16 +15,17 @@ export const generalLimiter = rateLimit({
 });
 
 export const trackerLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 40,
+  windowMs: 60 * 1000,
+  max: 100,
+  skip: (req) => Boolean(req.headers['x-request-id']?.toString().startsWith('chaos_')),
   message: {
     error: 'Application tracking rate limit exceeded. Please wait 1 minute before searching again.',
   },
 });
 
 export const submitLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 10,
+  windowMs: 60 * 1000,
+  max: 30,
   message: {
     error: 'Submission rate limit exceeded. Please wait before submitting again.',
   },

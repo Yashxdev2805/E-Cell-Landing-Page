@@ -5,6 +5,8 @@ import compression from 'compression';
 import morgan from 'morgan';
 import dotenv from 'dotenv';
 import { portalRouter } from './routes/portalRoutes.js';
+import { adminRouter } from './routes/adminRoutes.js';
+import { adminAuthMiddleware } from './middleware/adminAuth.js';
 import { generalLimiter } from './middleware/rateLimiter.js';
 import { OutboxWorker } from './services/outboxWorker.js';
 
@@ -18,7 +20,7 @@ app.set('trust proxy', true);
 // ── Security & Headers ──
 app.use(
   helmet({
-    contentSecurityPolicy: false, // Served as API
+    contentSecurityPolicy: false,
     frameguard: { action: 'deny' },
     noSniff: true,
     referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
@@ -27,10 +29,10 @@ app.use(
 
 app.use(
   cors({
-    origin: ['http://localhost:5174', 'http://127.0.0.1:5174', 'http://localhost:5173', 'http://127.0.0.1:5173'],
+    origin: ['http://localhost:5174', 'http://127.0.0.1:5174', 'http://localhost:5173', 'http://127.0.0.1:5173', 'http://localhost:8080'],
     methods: ['GET', 'POST', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'cf-turnstile-response'],
-    exposedHeaders: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-Cache-Lookup'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key', 'cf-turnstile-response', 'X-Admin-Key', 'X-Bypass-Cache'],
+    exposedHeaders: ['X-RateLimit-Limit', 'X-RateLimit-Remaining', 'X-Cache-Lookup', 'X-Proxy-Cache'],
     credentials: true,
   })
 );
@@ -61,8 +63,9 @@ app.get('/api/health', (_req, res) => {
   });
 });
 
-// ── Mount Portal Routes ──
+// ── Mount Portal & Admin Routes ──
 app.use('/api/portal', portalRouter);
+app.use('/api/admin', adminAuthMiddleware, adminRouter);
 
 // ── 404 Handler ──
 app.use((req, res) => {
@@ -75,7 +78,6 @@ app.use((req, res) => {
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {
     console.log(`🚀 [E-CellHubServer] Listening on http://127.0.0.1:${PORT}`);
-    // Start background outbox processor
     OutboxWorker.start(5000);
   });
 }
