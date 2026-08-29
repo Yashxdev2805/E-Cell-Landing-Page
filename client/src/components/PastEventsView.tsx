@@ -1,9 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, memo } from 'react';
 import {
   ArrowLeft,
   Calendar,
   Search,
-  ExternalLink,
 } from 'lucide-react';
 import { pastEvents, type PastEvent } from '../data/pastEvents';
 
@@ -21,27 +20,51 @@ const CATEGORY_BADGES: Record<PastEvent['category'], { label: string; color: str
 
 const YEARS = ['All', '2023', '2022', '2021', '2020', '2019'];
 
-export function PastEventsView({ onBack }: PastEventsViewProps) {
-  const [searchQuery, setSearchQuery] = useState('');
+// ── O(1) Precomputed Inverted Index Data Structures ──
+const yearIndexMap = new Map<string, PastEvent[]>();
+const categoryIndexMap = new Map<string, PastEvent[]>();
+const eventSearchCorpus = new Map<string, string>();
+
+// Initialize O(1) inverted indices once at module load
+YEARS.forEach((y) => yearIndexMap.set(y, []));
+pastEvents.forEach((ev) => {
+  if (!yearIndexMap.has(ev.year)) yearIndexMap.set(ev.year, []);
+  yearIndexMap.get(ev.year)!.push(ev);
+  yearIndexMap.get('All')!.push(ev);
+
+  if (!categoryIndexMap.has(ev.category)) categoryIndexMap.set(ev.category, []);
+  categoryIndexMap.get(ev.category)!.push(ev);
+
+  const corpus = `${ev.name} ${ev.description}`.toLowerCase();
+  eventSearchCorpus.set(ev.id, corpus);
+});
+
+export const PastEventsView = memo(function PastEventsView({ onBack }: PastEventsViewProps) {
   const [selectedYear, setSelectedYear] = useState('All');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [selectedModalEvent, setSelectedModalEvent] = useState<PastEvent | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedEvent, setSelectedEvent] = useState<PastEvent | null>(null);
 
+  // ── O(K) Optimized Filtering utilizing pre-indexed sets ──
   const filteredEvents = useMemo(() => {
-    return pastEvents.filter((event) => {
-      const matchesSearch =
-        event.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        event.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        event.date.toLowerCase().includes(searchQuery.toLowerCase());
-      const matchesYear = selectedYear === 'All' || event.year === selectedYear;
-      const matchesCategory = selectedCategory === 'all' || event.category === selectedCategory;
-      return matchesSearch && matchesYear && matchesCategory;
+    const candidates = yearIndexMap.get(selectedYear) || pastEvents;
+    const query = searchQuery.trim().toLowerCase();
+
+    return candidates.filter((ev) => {
+      if (selectedCategory !== 'all' && ev.category !== selectedCategory) {
+        return false;
+      }
+      if (query) {
+        const corpus = eventSearchCorpus.get(ev.id);
+        if (!corpus || !corpus.includes(query)) return false;
+      }
+      return true;
     });
-  }, [searchQuery, selectedYear, selectedCategory]);
+  }, [selectedYear, selectedCategory, searchQuery]);
 
   return (
-    <div className="min-h-screen pt-28 pb-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto animate-fade-in-up">
-      {/* Top Breadcrumb & Back Navigation */}
+    <div className="min-h-screen pt-28 sm:pt-32 pb-24 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      {/* Top Nav Bar */}
       <div className="flex items-center justify-between gap-4 mb-8">
         <button
           onClick={onBack}
@@ -109,11 +132,11 @@ export function PastEventsView({ onBack }: PastEventsViewProps) {
               onChange={(e) => setSelectedCategory(e.target.value)}
               className="ecell-input !py-2.5 text-xs sm:text-sm bg-[#12192c] border-slate-700 cursor-pointer"
             >
-              <option value="all">All Categories</option>
-              <option value="hackathon">Hackathons (SIH, Kavach...)</option>
-              <option value="workshop">Workshops (IPR, BMC...)</option>
-              <option value="competition">Competitions & Quizzes</option>
-              <option value="lecture">Guest Lectures & Alumni Talks</option>
+              <option value="all">All Categories ({pastEvents.length})</option>
+              <option value="hackathon">Hackathons</option>
+              <option value="workshop">Workshops & Bootcamps</option>
+              <option value="competition">Competitions & Shark Tanks</option>
+              <option value="lecture">Guest Lectures & Keynotes</option>
               <option value="exhibition">Exhibitions & Demos</option>
             </select>
           </div>
@@ -121,122 +144,107 @@ export function PastEventsView({ onBack }: PastEventsViewProps) {
       </div>
 
       {/* Events Grid */}
-      <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredEvents.map((event) => {
-          const badge = CATEGORY_BADGES[event.category];
-          return (
-            <div
-              key={event.id}
-              onClick={() => setSelectedModalEvent(event)}
-              className="ecell-card overflow-hidden flex flex-col justify-between group cursor-pointer hover:border-blue-500/40 transition-all"
-            >
-              {event.image ? (
-                <div className="h-44 w-full overflow-hidden bg-slate-900 relative">
-                  <img
-                    src={event.image}
-                    alt={event.name}
-                    className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
-                    onError={(e) => {
-                      (e.currentTarget as HTMLElement).style.display = 'none';
-                    }}
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-[#0d111a] via-transparent to-transparent" />
-                  <span
-                    className={`absolute top-3 left-3 px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${badge.color} backdrop-blur-md`}
-                  >
-                    {badge.label}
+      {filteredEvents.length === 0 ? (
+        <div className="text-center py-16 ecell-card bg-[#0a0e18]">
+          <Calendar className="w-12 h-12 text-slate-600 mx-auto mb-4" />
+          <h3 className="text-lg font-bold text-white mb-2">No matching events found</h3>
+          <p className="text-xs text-slate-400 max-w-sm mx-auto mb-6">
+            Try adjusting your search keywords or switching the year and category filters.
+          </p>
+          <button
+            onClick={() => { setSelectedYear('All'); setSelectedCategory('all'); setSearchQuery(''); }}
+            className="btn-primary text-xs py-2 px-4"
+          >
+            Reset Filters
+          </button>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {filteredEvents.map((ev) => {
+            const badge = CATEGORY_BADGES[ev.category] || { label: ev.category, color: 'bg-blue-500/10 text-blue-400 border-blue-500/25' };
+            return (
+              <div
+                key={ev.id}
+                onClick={() => setSelectedEvent(ev)}
+                className="ecell-card p-6 bg-[#0a0f1d] border-slate-800 hover:border-blue-500/40 cursor-pointer transition-all duration-300 flex flex-col justify-between group"
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-3">
+                    <span className={`text-[11px] font-bold px-2.5 py-1 rounded-full border ${badge.color}`}>
+                      {badge.label}
+                    </span>
+                    <span className="text-xs text-slate-500 font-mono font-bold bg-white/5 px-2 py-0.5 rounded">
+                      {ev.year}
+                    </span>
+                  </div>
+
+                  <h3 className="text-lg font-bold text-white font-heading group-hover:text-blue-400 transition-colors line-clamp-2 mb-2">
+                    {ev.name}
+                  </h3>
+
+                  <p className="text-xs text-slate-400 line-clamp-3 leading-relaxed mb-4">
+                    {ev.description}
+                  </p>
+                </div>
+
+                <div className="pt-4 border-t border-slate-800/80 flex items-center justify-between text-xs text-slate-500">
+                  <span>{ev.date}</span>
+                  <span className="text-blue-400 font-semibold group-hover:translate-x-0.5 transition-transform flex items-center gap-1">
+                    Details →
                   </span>
-                </div>
-              ) : (
-                <div className="p-4 pb-0 flex items-center justify-between">
-                  <span
-                    className={`px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider border ${badge.color}`}
-                  >
-                    {badge.label}
-                  </span>
-                  <span className="text-xs text-slate-500 font-mono">{event.year}</span>
-                </div>
-              )}
-
-              <div className="p-5 flex flex-col flex-1">
-                <div className="flex items-center gap-1.5 text-xs text-amber-400 font-medium mb-2">
-                  <Calendar className="w-3.5 h-3.5" />
-                  <span>{event.date || event.year}</span>
-                </div>
-
-                <h3 className="text-lg font-bold text-white font-heading leading-snug group-hover:text-blue-300 transition-colors mb-2">
-                  {event.name}
-                </h3>
-
-                <p className="text-xs sm:text-sm text-slate-400 leading-relaxed line-clamp-3 mb-4">
-                  {event.description}
-                </p>
-
-                <div className="mt-auto pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs font-semibold text-blue-400">
-                  <span>View Details</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
                 </div>
               </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {filteredEvents.length === 0 && (
-        <div className="ecell-card p-12 text-center my-8">
-          <Calendar className="w-12 h-12 text-slate-600 mx-auto mb-3" />
-          <p className="text-base text-slate-300 font-semibold mb-1">No past events match your criteria</p>
-          <p className="text-xs text-slate-500">Try changing the year filter or clearing search keywords.</p>
+            );
+          })}
         </div>
       )}
 
-      {/* Event Detail Modal */}
-      {selectedModalEvent && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in-up">
-          <div className="ecell-card w-full max-w-lg p-6 sm:p-8 relative bg-[#0b101c] border border-slate-700 shadow-2xl max-h-[90vh] overflow-y-auto">
+      {/* Detail Modal */}
+      {selectedEvent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in-up">
+          <div className="ecell-card w-full max-w-xl p-6 sm:p-8 relative bg-[#0a0e1a] border border-slate-700 shadow-2xl">
             <button
-              onClick={() => setSelectedModalEvent(null)}
-              className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-slate-400 hover:text-white"
+              onClick={() => setSelectedEvent(null)}
+              className="absolute top-4 right-4 w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-slate-400 hover:text-white cursor-pointer"
             >
               ✕
             </button>
 
-            {selectedModalEvent.image && (
-              <img
-                src={selectedModalEvent.image}
-                alt={selectedModalEvent.name}
-                className="w-full h-52 object-cover rounded-xl mb-4 border border-slate-800"
-              />
-            )}
-
-            <div className="flex items-center gap-2 mb-2">
-              <span
-                className={`px-2.5 py-1 rounded-md text-[11px] font-bold uppercase tracking-wider border ${
-                  CATEGORY_BADGES[selectedModalEvent.category].color
-                }`}
-              >
-                {CATEGORY_BADGES[selectedModalEvent.category].label}
+            <div className="flex items-center gap-2 mb-3">
+              <span className={`text-xs font-bold px-3 py-1 rounded-full border ${
+                CATEGORY_BADGES[selectedEvent.category]?.color || 'bg-blue-500/10 text-blue-400'
+              }`}>
+                {CATEGORY_BADGES[selectedEvent.category]?.label || selectedEvent.category}
               </span>
-              <span className="text-xs text-slate-400 font-mono">{selectedModalEvent.date}</span>
+              <span className="text-xs text-slate-400 font-mono">Year {selectedEvent.year}</span>
             </div>
 
-            <h3 className="text-xl sm:text-2xl font-bold text-white font-heading mb-3">
-              {selectedModalEvent.name}
+            <h3 className="text-xl sm:text-2xl font-bold text-white font-heading mb-4">
+              {selectedEvent.name}
             </h3>
 
-            <p className="text-sm text-slate-300 leading-relaxed mb-6">
-              {selectedModalEvent.description}
+            <div className="space-y-3 text-xs text-slate-300 mb-6 bg-white/5 p-4 rounded-xl border border-white/5">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-500 font-semibold">Date:</span>
+                <span className="font-medium text-white">{selectedEvent.date}</span>
+              </div>
+            </div>
+
+            <p className="text-xs sm:text-sm text-slate-300 leading-relaxed mb-6">
+              {selectedEvent.description}
             </p>
 
-            <button
-              onClick={() => setSelectedModalEvent(null)}
-              className="btn-primary w-full text-xs py-2.5 justify-center"
-            >
-              Close
-            </button>
+            <div className="flex justify-end">
+              <button
+                onClick={() => setSelectedEvent(null)}
+                className="btn-primary text-xs py-2 px-6"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}
     </div>
   );
-}
+});
