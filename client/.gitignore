@@ -9,7 +9,7 @@ ecell-portal-development-phases.md
 *planning*.md
 
 # ============================================================
-# Environment Variables, Secrets & API Credentials
+# Environment Variables, Secrets & Cloud Service Accounts
 # ============================================================
 .env
 .env.*
@@ -28,6 +28,10 @@ server/.env.*
 *.key
 *.p12
 *.cert
+*firebase-adminsdk*.json
+event-registration-page-*.json
+server/*firebase-adminsdk*.json
+server/event-registration-page-*.json
 *service-account*.json
 *credentials*.json
 *secret*.json
